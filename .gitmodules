@@ -1,0 +1,3 @@
+[submodule "glsl-parser"]
+	path = glsl-parser
+	url = git@github.com:nnesse/glsl-parser.git

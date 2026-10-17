@@ -4,14 +4,18 @@
 # Dependencies: clang (with wasm32 target), wasm-ld, flex, bison
 #
 
-GLSL_SRC   = ../glsl-parser
+# Source for the glsl-parser library.
+# Default: bundled git submodule.  Override with:
+#   make GLSL_SRC=../glsl-parser   (use a sibling working copy)
+#   GLSL_SRC=../glsl-parser make   (env var)
+GLSL_SRC   ?= glsl-parser
 CC         = clang
 WASM_LD    = wasm-ld
 FLEX       = flex
 BISON      = bison
 
 CFLAGS     = --target=wasm32-freestanding -nostdlib -DNDEBUG -O2 \
-             -Ishim -Ilibmin -Iwrapper -I$(GLSL_SRC)
+             -Ishim -Ilibmin -Iwrapper -I$(GLSL_SRC) -I.
 
 # Generated files
 LEX_SRC    = $(GLSL_SRC)/glsl.lex
