@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GLSL Parser WASM — Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; padding: 2rem; max-width: 900px; margin: 0 auto; background: #fff; color: #222; }
+    h1 { margin-bottom: 0.5rem; }
+    p { margin-bottom: 1rem; color: #666; }
+    textarea { width: 100%; height: 180px; font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 13px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.5rem; resize: vertical; }
+    button { padding: 0.5rem 1.25rem; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f8f8f8; font-size: 14px; margin-right: 0.5rem; transition: background 0.15s; }
+    button:hover { background: #eee; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #status { margin: 0.5rem 0; font-size: 14px; }
+    #output { background: #f5f5f5; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 12px; max-height: 60vh; overflow: auto; border: 1px solid #eee; line-height: 1.5; }
+    .error { color: #c00; }
+    .ok { color: #080; }
+  </style>
+</head>
+<body>
+  <h1>GLSL Parser WASM</h1>
+  <p id="status">Loading WASM module...</p>
+
+  <textarea id="source">#version 450
+
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec2 aUV;
+
+layout(location = 0) out vec4 fragColor;
+
+uniform mat4 uProjection;
+uniform mat4 uView;
+uniform mat4 uModel;
+uniform float uTime;
+
+void main() {
+    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    vec4 viewPos = uView * worldPos;
+    gl_Position = uProjection * viewPos;
+    fragColor = vec4(aUV, sin(uTime), 1.0);
+}</textarea>
+
+  <div>
+    <button id="parseBtn" disabled>Parse</button>
+    <button id="clearBtn">Clear</button>
+  </div>
+
+  <div id="output"></div>
+
+  <script type="module">
+    import { loadModule, parseSync } from '../js/glsl-parser.js';
+
+    const statusEl = document.getElementById('status');
+    const outputEl = document.getElementById('output');
+    const parseBtn = document.getElementById('parseBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const sourceEl = document.getElementById('source');
+
+    clearBtn.addEventListener('click', () => { outputEl.textContent = ''; });
+
+    parseBtn.addEventListener('click', () => {
+      const source = sourceEl.value;
+      const t0 = performance.now();
+      try {
+        const ast = parseSync(source);
+        const ms = (performance.now() - t0).toFixed(2);
+        if (ast) {
+          statusEl.innerHTML = `<span class="ok">Parsed successfully in ${ms}ms</span>`;
+          outputEl.className = '';
+          outputEl.textContent = JSON.stringify(ast, null, 2);
+        } else {
+          statusEl.textContent = `Parse returned null in ${ms}ms`;
+          outputEl.className = 'error';
+          outputEl.textContent = 'Parse returned null (possible syntax error)';
+        }
+      } catch (e) {
+        statusEl.innerHTML = `<span class="error">Error: ${e.message}</span>`;
+        outputEl.className = 'error';
+        outputEl.textContent = e.stack;
+      }
+    });
+
+    loadModule(new URL('../glsl-parser.wasm', import.meta.url))
+      .then(() => {
+        statusEl.innerHTML = '<span class="ok">WASM module loaded. Ready to parse.</span>';
+        parseBtn.disabled = false;
+      })
+      .catch(err => {
+        statusEl.innerHTML = `<span class="error">Failed to load WASM: ${err.message}</span>`;
+        outputEl.className = 'error';
+        outputEl.textContent = err.stack;
+      });
+  </script>
+</body>
+</html>

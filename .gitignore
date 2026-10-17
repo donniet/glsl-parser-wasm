@@ -1,0 +1,13 @@
+# Build output
+*.wasm
+*.o
+
+# Flex/Bison generated sources
+glsl.lexer.c
+glsl.lexer.h
+glsl.parser.c
+glsl.parser.h
+
+# IDE
+.vscode/
+.idea/
