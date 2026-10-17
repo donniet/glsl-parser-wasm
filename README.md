@@ -1,16 +1,20 @@
 # GLSL Parser WASM
 
-Minimal WebAssembly build of the [glsl-parser](../glsl-parser/) C/Bison/Flex library, with **zero external dependencies** beyond Clang/LLVM.
+Minimal WebAssembly build of the [glsl-parser](https://github.com/nnesse/glsl-parser) C/Bison/Flex library, with **zero external dependencies** beyond Clang/LLVM.
 
 No Emscripten. No sysroot. No libc. Just the parser, a ~300-line minimal C library, and a thin JS wrapper.
 
 ## Build
 
 ```bash
+git clone --recursive <repo-url> && cd glsl-parser-wasm
 make
 ```
 
 Requires: `clang` (with wasm32 target), `wasm-ld`, `flex`, `bison`.
+
+The parser sources are bundled as a git submodule (`glsl-parser/`).  Override
+with `GLSL_SRC=../glsl-parser make` to use a sibling working copy instead.
 
 Produces: `glsl-parser.wasm` (~85 KB)
 
@@ -52,7 +56,7 @@ See `test/index.html` for a working demo.
 ├─────────────────────────────────────────────────┤
 │  WASM Module (glsl-parser.wasm)                 │
 │  ┌──────────────┐  ┌──────────────────────────┐ │
-│  │ wrapper/     │  │  ../glsl-parser/         │ │
+│  │ wrapper/     │  │  glsl-parser/ (submodule) │ │
 │  │ wasm_api.c   │  │  glsl.y  (Bison parser)  │ │
 │  │ (exports)    │  │  glsl.lex (Flex lexer)   │ │
 │  │              │  │  glsl_ast.c (AST utils)   │ │
@@ -73,7 +77,8 @@ See `test/index.html` for a working demo.
 
 ```
 glsl-parser-wasm/
-├── Makefile                  # Build system
+├── glsl-parser/              # git submodule (nnesse/glsl-parser)
+├── Makefile                  # Build system (GLSL_SRC ?= glsl-parser)
 ├── libmin/
 │   ├── minlib.h              # Minimal libc declarations
 │   └── minlib.c              # malloc/free/realloc, string, atoi, atof, vsnprintf
