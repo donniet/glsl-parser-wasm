@@ -40,7 +40,7 @@ const TOKEN_NAMES = {};
  */
 async function loadModule(source) {
   let bytes;
-  if (source instanceof ArrayBuffer || source instanceof Buffer) {
+  if (source instanceof ArrayBuffer || (typeof Buffer !== 'undefined' && source instanceof Buffer)) {
     bytes = source;
   } else {
     const response = await fetch(source);
@@ -56,6 +56,8 @@ async function loadModule(source) {
           const result = _memory.grow(pages);
           if (result === -1) return 0;
         }
+        // Re-create the view in case the buffer was reallocated
+        _heap_u8 = new Uint8Array(_memory.buffer);
         return _memory.buffer.byteLength;
       },
       memory: _memory,
@@ -112,13 +114,16 @@ function _allocString(str) {
  * @returns {string|null}
  */
 function _readString(ptr) {
-  if (!ptr) return null;
+  if (!ptr || ptr < 0 || ptr >= _heap_u8.length) return null;
   const bytes = [];
   let i = ptr;
-  while (_heap_u8[i] !== 0) {
+  // Safety limit: cap at 4096 bytes to prevent walking through garbage memory
+  const limit = Math.min(ptr + 4096, _heap_u8.length);
+  while (i < limit && _heap_u8[i] !== 0) {
     bytes.push(_heap_u8[i]);
     i++;
   }
+  if (i >= limit) return null; // hit the limit without finding null terminator
   return new TextDecoder().decode(new Uint8Array(bytes));
 }
 
