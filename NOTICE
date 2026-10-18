@@ -1,0 +1,30 @@
+glsl-parser-wasm
+Copyright (C) 2025 Donniet
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+---
+
+This project wraps the following third-party component:
+
+  glsl-parser — A GLSL parser written in C
+  Copyright (C) 2025 Nicholas Nesbitt
+  Licensed under GNU General Public License v2
+  https://github.com/nnesse/glsl-parser
+
+The glsl-parser source is included as a git submodule (glsl-parser/).
+The compiled WASM binary (glsl-parser.wasm) is a derivative work of
+the glsl-parser C library and is distributed under the GPL v2.
+
+The JavaScript wrapper (js/glsl-parser.js), AST utilities
+(js/glsl-ast-utils.js), C wrapper (wrapper/wasm_api.c), header shims
+(shim/), and minimal library (libmin/) are original works licensed
+under the GPL v2.
