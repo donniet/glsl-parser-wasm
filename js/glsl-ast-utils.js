@@ -16,7 +16,7 @@ import { loadModule, parseSync } from './glsl-parser.js';
 /*  Eager WASM initialization                                         */
 /* ------------------------------------------------------------------ */
 
-const _wasmPath = new URL('glsl-parser.wasm', import.meta.url);
+const _wasmPath = new URL('../glsl-parser.wasm', import.meta.url);
 const _wasmReady = loadModule(_wasmPath);
 
 /**
