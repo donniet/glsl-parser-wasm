@@ -298,37 +298,45 @@ export function extractUniforms(ast) {
 function extractUniformsFromDeclaration(declNode) {
   const uniforms = [];
 
-  const qualifierList = findChild(declNode, NODE.TYPE_QUALIFIER_LIST);
-  if (!qualifierList) return uniforms;
+  // The AST structure for a uniform declaration is:
+  // DECLARATION → INIT_DECLARATOR_LIST → SINGLE_DECLARATION
+  //   → FULLY_SPECIFIED_TYPE → TYPE_QUALIFIER_LIST → UNIFORM
+  //   → IDENTIFIER (the uniform name)
+  //
+  // We need to traverse INIT_DECLARATOR_LIST → SINGLE_DECLARATION to find
+  // the FULLY_SPECIFIED_TYPE that contains the TYPE_QUALIFIER_LIST.
 
-  let hasUniform = false;
-  for (const child of qualifierList.children || []) {
-    if (child.code === NODE.UNIFORM) {
-      hasUniform = true;
-      break;
-    }
-  }
-  if (!hasUniform) return uniforms;
+  const initList = findChild(declNode, NODE.INIT_DECLARATOR_LIST);
+  if (!initList) return uniforms;
 
-  const singleDecl = findChild(declNode, NODE.SINGLE_DECLARATION);
-  if (!singleDecl) return uniforms;
+  for (const initItem of initList.children || []) {
+    if (initItem.code !== NODE.SINGLE_DECLARATION) continue;
 
-  const initList = findChild(singleDecl, NODE.INIT_DECLARATOR_LIST);
+    // Find FULLY_SPECIFIED_TYPE inside SINGLE_DECLARATION
+    const fullySpecType = findChild(initItem, NODE.FULLY_SPECIFIED_TYPE);
+    if (!fullySpecType) continue;
 
-  const typeSpec = findChild(singleDecl, NODE.TYPE_SPECIFIER);
-  const typeName = typeSpec ? extractTypeName(typeSpec) : 'unknown';
+    // Check for UNIFORM qualifier inside TYPE_QUALIFIER_LIST
+    const qualifierList = findChild(fullySpecType, NODE.TYPE_QUALIFIER_LIST);
+    if (!qualifierList) continue;
 
-  if (initList) {
-    for (const initDeclItem of initList.children || []) {
-      if (initDeclItem.code === NODE.INIT_DECLARATOR) {
-        const declarator = findChild(initDeclItem, NODE.PARAMETER_DECLARATOR);
-        if (declarator) {
-          const ident = findChild(declarator, NODE.IDENTIFIER);
-          if (ident && ident.data.str) {
-            uniforms.push({ name: ident.data.str, type: typeName });
-          }
-        }
+    let hasUniform = false;
+    for (const child of qualifierList.children || []) {
+      if (child.code === NODE.UNIFORM) {
+        hasUniform = true;
+        break;
       }
+    }
+    if (!hasUniform) continue;
+
+    // Extract type from TYPE_SPECIFIER inside FULLY_SPECIFIED_TYPE
+    const typeSpec = findChild(fullySpecType, NODE.TYPE_SPECIFIER);
+    const typeName = typeSpec ? extractTypeName(typeSpec) : 'unknown';
+
+    // Extract identifier: direct child of SINGLE_DECLARATION
+    const ident = findChild(initItem, NODE.IDENTIFIER);
+    if (ident && ident.data.str) {
+      uniforms.push({ name: ident.data.str, type: typeName });
     }
   }
 
