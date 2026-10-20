@@ -47,7 +47,7 @@ async function loadModule(source) {
     bytes = await response.arrayBuffer();
   }
 
-  _memory = new WebAssembly.Memory({ initial: 2, maximum: 256 });
+  _memory = new WebAssembly.Memory({ initial: 2, maximum: 4096 });
 
   const { instance } = await WebAssembly.instantiate(bytes, {
     env: {
