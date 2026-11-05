@@ -104,13 +104,23 @@ void *malloc(size_t size)
         if (!new_size)
             for (;;);  /* unreachable — trap */
 
-        /* Add the new region as a free block */
+        /* Add the new region as a free block. It is the highest-address
+           region in the heap, so append it at the TAIL to keep the free list
+           sorted by address — free() walks the list in address order to find
+           the coalescing neighbours, which breaks if the list is unsorted. */
         size_t old_end = (size_t)heap_end;
         heap_end = (uint8_t *)new_size;
         curr = (block_header *)old_end;
         curr->size = (size_t)(heap_end - old_end - HEADER_SIZE);
-        curr->next = free_list;
-        free_list  = curr;
+        curr->next = NULL;
+        if (!free_list)
+            free_list = curr;
+        else {
+            block_header *tail = free_list;
+            while (tail->next)
+                tail = tail->next;
+            tail->next = curr;
+        }
 
         /* Re-search */
         prev = NULL;
@@ -185,8 +195,14 @@ void free(void *ptr)
         }
     }
 
-    if (!prev)
-        free_list = block;
+    /* Link the block into the list. When it was absorbed into prev above,
+       prev already points past it, so only link when it is a distinct node. */
+    if (block != prev) {
+        if (prev)
+            prev->next = block;
+        else
+            free_list = block;
+    }
 }
 
 void *realloc(void *ptr, size_t size)

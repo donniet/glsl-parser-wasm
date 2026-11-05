@@ -60,3 +60,114 @@ node test/test.mjs                    # Run tests
 - wrapper: ~160 lines
 - JS loader: ~180 lines
 - Total new code: ~810 lines
+
+## Task: numeric-literal lexer fix (2026-11-05)
+
+Bug: glsl.lex floating_constant `{digit}+\.{digit}+` had no exponent alternative.
+`1e5`, `1e-5`, `1E+5`, `1.0e5`, `1.` all failed to parse (probed against built wasm).
+Scope (user-decided): exponent + spec-optional suffixes (f, u/ul/lu) + hex (0x.., 0x..p..).
+Fix location (user-decided): fork nnesse/glsl-parser → donniet/glsl-parser-flex, bump gitlink.
+Also file upstream PR to nnesse/glsl-parser.
+
+### Checklist
+- [x] Edit glsl-parser/glsl.lex (macros + rules + hex helpers in %{ %})
+- [x] Native sanity build in submodule (gcc) + glsl_parser_test stdin probe
+- [x] Extend test/test.mjs with Numeric literals block (values + negative cases)
+- [x] make clean && make (wasm rebuild), node test/test.mjs — all 6 tests green, memory flat
+- [x] Fix minlib.c free-list bugs (outer repo only; see section below), leak probe flat, probes deleted
+- [x] Update README.md + NOTICE (fork attribution)
+- [x] Submodule: make clean (tree clean), commit glsl.lex = 77cf76c on master, fork remote added
+- [ ] User creates fork donniet/glsl-parser-flex (no gh CLI / token on this box)
+- [ ] `git -C glsl-parser push fork master`
+- [ ] Outer: git submodule set-url + sync, bump gitlink (77cf76c), commit (+minlib.c, test.mjs, docs), push
+- [ ] Upstream PR nnesse/glsl-parser (body drafted below; needs API/token or user opens compare)
+
+### Commands
+```
+cd glsl-parser && make && echo '...' | ./glsl_parser_test   # native sanity
+cd glsl-parser && make clean                                 # keep submodule tree clean
+make clean && make && node test/test.mjs                     # wasm build + tests
+```
+
+### Facts
+- Bison token codes (stable, glsl.y unchanged): FLOATCONSTANT=412, INTCONSTANT=414, UINTCONSTANT=415, DOT=445
+- libmin atof handles dot/exponent/sign, stops at f-suffix → decimal forms need no libmin change
+- Hex int/float parsed by inline helpers in lexer (no new libmin deps; keeps portability for upstream gcc build)
+- Hex float value = hex-int mantissa * 2^exp via multiply loop (no ldexp: libmin math.h is empty shim)
+- Submodule native build generates glsl.lexer.c/.parser.c INSIDE glsl-parser/ — `make clean` after
+- No GitHub token on this box (checked env, ~/.config/gh, git credential.helper, ~/.git-credentials); SSH only → fork/PR are API-only actions
+
+### Ruled out
+- `1.e5` parsing pre-fix was NOT real float support: lexed INTCONSTANT DOT IDENTIFIER, accepted via
+  the member-access production (glsl.y:1278 `postfix_expression DOT field_identifier`). False positive.
+  Post-fix it really lexes as FLOATCONSTANT (test 6 asserts no DOT node appears under the expression).
+- `0x1.8p1` (hex fraction, invalid GLSL): the earlier note claiming it false-positives through the DOT
+  production was WRONG. Verified natively against the fixed lexer — it is correctly REJECTED (lexes
+  `0x1` then fails on `.`). It is a valid negative test and is in test 6. Only `1.e5` had the DOT
+  false positive.
+- `2f` (bare integer + f suffix) is NOT a valid GLSL float literal — glslang rejects it. The lexer
+  correctly rejects it (integer_constant has no f suffix). An early positive test using `2f` was
+  corrected to `2.0f`.
+
+### minlib.c allocator bugs (outer repo; fixed 2026-11-05)
+Two independent bugs caused every parse/free cycle to grow WASM memory ~17 pages (one 1 MiB chunk):
+1. `free()` tail: after coalescing into `prev`, or on a plain insert, the code only handled the
+   head-of-list case (`if (!prev) free_list = block;`) and never wrote `prev->next = block` — a
+   mid-list freed block was simply lost (leaked forever).
+2. `malloc()` grow path PREPENDED the newly grown region to the head of the free list. That region is
+   the HIGHEST-address one, so the list stopped being address-sorted — the invariant `free()`'s
+   prev/curr walk relies on for finding coalescing neighbours. Fragmentation then forced spurious
+   grows.
+Fix: free() links `prev->next = block` (or `free_list = block`) when the block wasn't absorbed into
+prev; malloc() appends the grown block at the TAIL of the free list.
+Verified: full suite flat at 19 pages across all 6 tests (was 19→36 at test 4); 30-cycle leak probe
+plateaus (19 pages small shader / 36 pages large). libmin is outer-repo-only — stays OUT of the
+upstream PR.
+
+### Related: new_glsl_node bump arena does not zero the data union
+In a reused 1 MiB chunk, `wasm_glsl_node_data_str` on a non-identifier node returns stale pointer
+bits (previously hidden because leaked chunks were zeroed). test.mjs test 5 now reads data_str only
+for IDENTIFIER nodes (code 411), and readString is bounds-safe (stops at end of memory).
+
+### Results (2026-11-05)
+- test/test.mjs: all 6 tests green, incl. Test 6 Numeric literals (19 positives asserting token
+  code + value, 5 negatives: `5e`, `1e`, `0x`, `1.5g`, `0x1.8p1`).
+- Native: gcc build in submodule green; /tmp/opencode/lits.glsl (18 literals) parses with correct
+  values; 0xFFp-2 → 63.75, 0xFFu → 255, 0x1F → 31.
+- Uppercase hex bug found via native probe (0xFFp-2 → 0.0): case-fold `if (c >= 'a') c -= 32`
+  never folded A-F; fixed with explicit A-F range in glsl_hex_digit_value.
+- glsl.lex committed in submodule as 77cf76c (master, on 7bd70e1); fork push + gitlink bump +
+  upstream PR blocked on user creating donniet/glsl-parser-flex (no gh CLI/token on this box).
+
+### Upstream PR draft (nnesse/glsl-parser)
+Title: `glsl.lex: accept full GLSL numeric literal set (exponent, suffix, hex)`
+
+Body:
+---
+`float a = 1e5;` is rejected with a syntax error, as are `1e-5`, `1E+5`, `1.0e5`,
+the trailing-dot form `1.`, hex literals (`0x1F`, `0x1p2`), and the spec-optional
+suffixes (`1.5f`, `123u`, `123ul`). GLSL 4.1.4 Appendix A (and ESSL 3.00 A.7) all
+of these; glslang accepts them. Only `{digit}+\.{digit}+` was recognized.
+
+This change makes the lexer accept the full literal set:
+
+- `floating_constant`: exponent alternative (`[eE][+-]?{digit}+`), trailing-dot
+  form, optional `f` suffix
+- `integer_constant`: hex form and `u`/`l`/`ul`/`lu` suffixes; suffixed integers
+  are returned as `UINTCONSTANT` (they cannot fit a signed `INTCONSTANT`)
+- `hex_float_constant` (new): `0xHEXp[+-]DEC` → `FLOATCONSTANT`
+  (GLSL has no hex fraction, so the mantissa is a plain hex integer)
+- value computation uses small self-contained helpers in the `%{ %}` prologue
+  (shift/multiply loops, no `strtol`/`ldexp`), so the file still builds with a
+  plain gcc and stays portable to freestanding targets
+
+Notes:
+- longest-match keeps bare `123` as `INTCONSTANT` and `0x1p2` as a hex float
+- permissive corner: `1.e5` is accepted as a float (glslang does too);
+  strict-spec would reject the leading form
+- `2f` remains invalid (glslang rejects it too)
+- negative cases all still rejected: `5e`, `1e`, `0x`, `1.5g`, `0x1.8p1`
+
+Verified against glslang on the positive cases; the diff is lexer-only,
+no grammar changes.
+---

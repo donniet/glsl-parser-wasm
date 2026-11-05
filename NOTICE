@@ -20,7 +20,13 @@ This project wraps the following third-party component:
   Licensed under GNU General Public License v2
   https://github.com/nnesse/glsl-parser
 
-The glsl-parser source is included as a git submodule (glsl-parser/).
+The glsl-parser source is included as a git submodule (glsl-parser/),
+pinned to donniet/glsl-parser-flex (https://github.com/donniet/glsl-parser-flex),
+a fork of nnesse/glsl-parser that additionally contains a local patch to
+glsl.lex fixing numeric-literal lexing (exponent, suffix, and hex forms per
+GLSL 4.1.4 / ESSL 3.00 Appendix A). The same change is proposed upstream
+to nnesse/glsl-parser.
+
 The compiled WASM binary (glsl-parser.wasm) is a derivative work of
 the glsl-parser C library and is distributed under the GPL v2.
 

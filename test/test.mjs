@@ -45,13 +45,15 @@ async function main() {
     return { ptr, len };
   }
 
-  // Helper: read string from WASM memory
+  // Helper: read string from WASM memory. Bounds-safe: stops at the end of
+  // linear memory so a bogus pointer can't run the scan off the buffer.
   function readString(ptr) {
     if (!ptr) return null;
-    const bytes = [];
     const view = new Uint8Array(memory.buffer);
+    if (ptr >= view.length) return null;
+    const bytes = [];
     let i = ptr;
-    while (view[i] !== 0) {
+    while (i < view.length && view[i] !== 0) {
       bytes.push(view[i]);
       i++;
     }
@@ -161,32 +163,133 @@ async function main() {
 
   console.log(`  Parse error: ${err5 ? 'YES' : 'NO'}`);
 
-  // Recursively find identifier nodes
-  function findIdentifiers(node, depth) {
+  // Recursively find identifier nodes. Only IDENTIFIER (code 411) nodes hold
+  // a string; the data union of every other node type holds a number or NULL,
+  // so reading data_str on them is meaningless (and, on a reused arena chunk,
+  // yields stale pointer bits).
+  const IDENTIFIER_CODE = 411;
+  function findIdentifiers(node) {
     const results = [];
     if (!node) return results;
-    const code = exp.wasm_glsl_node_code(node);
-    // IDENTIFIER token is typically a specific code; let's look for string data
-    const strPtr = exp.wasm_glsl_node_data_str(node);
-    if (strPtr) {
-      const str = readString(strPtr);
-      if (str) results.push(str);
+    if (exp.wasm_glsl_node_code(node) === IDENTIFIER_CODE) {
+      const strPtr = exp.wasm_glsl_node_data_str(node);
+      if (strPtr) {
+        const str = readString(strPtr);
+        if (str) results.push(str);
+      }
     }
     const childCount = exp.wasm_glsl_node_child_count(node);
-    for (let i = 0; i < childCount; i++) {
-      const child = exp.wasm_glsl_node_child(node, i);
-      results.push(...findIdentifiers(child, depth + 1));
-    }
+    for (let i = 0; i < childCount; i++)
+      results.push(...findIdentifiers(exp.wasm_glsl_node_child(node, i)));
     return results;
   }
 
   const root5 = exp.wasm_glsl_get_root(ctx5);
   if (root5) {
-    const ids = findIdentifiers(root5, 0);
+    const ids = findIdentifiers(root5);
     console.log(`  Identifiers found: ${ids.join(', ')}`);
   }
 
   exp.wasm_glsl_parse_free(ctx5);
+
+  // Test 6: Numeric literals (GLSL 4.1.4 / ESSL 3.00, Appendix A)
+  // Regression: the lexer previously rejected exponent forms (1e5, 1.0e5),
+  // the trailing-dot form (1.), the f/u/ul/lu suffixes, and hex literals.
+  console.log('\n=== Test 6: Numeric literals ===');
+
+  // Token codes from the bison-generated glsl.parser.h (stable: glsl.y unchanged)
+  const TOK = { FLOATCONSTANT: 412, INTCONSTANT: 414, UINTCONSTANT: 415, DOT: 445 };
+  let numFailures = 0;
+  function check(cond, msg) {
+    if (cond) {
+      console.log(`  ok: ${msg}`);
+    } else {
+      numFailures++;
+      console.error(`  FAIL: ${msg}`);
+    }
+  }
+
+  function collectNodes(node, code, out) {
+    out = out || [];
+    if (!node) return out;
+    if (exp.wasm_glsl_node_code(node) === code) out.push(node);
+    const count = exp.wasm_glsl_node_child_count(node);
+    for (let i = 0; i < count; i++)
+      collectNodes(exp.wasm_glsl_node_child(node, i), code, out);
+    return out;
+  }
+
+  function parseSource(src) {
+    const ctx = exp.wasm_glsl_parse_init();
+    const { ptr, len } = allocString(src);
+    const err = exp.wasm_glsl_parse_string(ctx, ptr, len);
+    exp.wasm_free(ptr);
+    return { ctx, err };
+  }
+
+  // [source, token code, data kind, expected value]
+  const positives = [
+    ['float a = 1e5;',     TOK.FLOATCONSTANT, 'f',  100000],
+    ['float b = 1e-5;',    TOK.FLOATCONSTANT, 'f',  1e-5],
+    ['float c = 1E+5;',    TOK.FLOATCONSTANT, 'f',  100000],
+    ['float d = 1.0e5;',   TOK.FLOATCONSTANT, 'f',  100000],
+    ['float e = 1.5e-3;',  TOK.FLOATCONSTANT, 'f',  0.0015],
+    ['float f = 0.5E2;',   TOK.FLOATCONSTANT, 'f',  50],
+    ['float g = 1.;',      TOK.FLOATCONSTANT, 'f',  1],
+    ['float h = 1.e5;',    TOK.FLOATCONSTANT, 'f',  100000],
+    ['float i = 1.5f;',    TOK.FLOATCONSTANT, 'f',  1.5],
+    ['float j = 2.0f;',    TOK.FLOATCONSTANT, 'f',  2],
+    ['float k = 0x1p2;',   TOK.FLOATCONSTANT, 'f',  4],
+    ['float l = 0xFFp-2;', TOK.FLOATCONSTANT, 'f',  63.75],
+    ['uint m = 1u;',       TOK.UINTCONSTANT,  'ui', 1],
+    ['uint n = 12ul;',     TOK.UINTCONSTANT,  'ui', 12],
+    ['uint o = 12lu;',     TOK.UINTCONSTANT,  'ui', 12],
+    ['uint p = 0xFFu;',    TOK.UINTCONSTANT,  'ui', 255],
+    ['int q = 5;',         TOK.INTCONSTANT,   'i',  5],
+    ['int r = 0x1F;',      TOK.INTCONSTANT,   'i',  31],
+    ['int s = 0XAB;',      TOK.INTCONSTANT,   'i',  171],
+  ];
+
+  for (const [src, code, kind, expected] of positives) {
+    const { ctx, err } = parseSource(src);
+    if (err) {
+      check(false, `${src} -> parses`);
+      exp.wasm_glsl_parse_free(ctx);
+      continue;
+    }
+    const root = exp.wasm_glsl_get_root(ctx);
+    const nodes = collectNodes(root, code);
+    let ok = nodes.length === 1;
+    let detail = `found ${nodes.length} token-${code} node(s)`;
+    if (ok) {
+      const got = kind === 'f' ? exp.wasm_glsl_node_data_f(nodes[0])
+                : kind === 'ui' ? exp.wasm_glsl_node_data_ui(nodes[0])
+                : exp.wasm_glsl_node_data_i(nodes[0]);
+      const tol = 1e-6 * Math.max(1, Math.abs(expected));
+      ok = Math.abs(got - expected) <= tol;
+      detail = `value ${got} (expected ${expected})`;
+      // 1.e5 used to parse as INTCONSTANT DOT IDENTIFIER (a member access on
+      // an int literal); make sure that false positive is gone.
+      if (src.includes('1.e5'))
+        ok = ok && collectNodes(root, TOK.DOT).length === 0;
+    }
+    check(ok, `${src} -> ${detail}`);
+    exp.wasm_glsl_parse_free(ctx);
+  }
+
+  // Invalid literals must be rejected, not partially lexed
+  const negatives = ['5e', '1e', '0x', '1.5g', '0x1.8p1'];
+  for (const lit of negatives) {
+    const src = `float x = ${lit};`;
+    const { ctx, err } = parseSource(src);
+    check(err !== 0, `${src} -> rejected`);
+    exp.wasm_glsl_parse_free(ctx);
+  }
+
+  if (numFailures) {
+    console.error(`\n${numFailures} numeric literal check(s) failed`);
+    process.exit(1);
+  }
 
   console.log('\n=== All tests passed! ===');
 }

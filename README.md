@@ -13,8 +13,25 @@ make
 
 Requires: `clang` (with wasm32 target), `wasm-ld`, `flex`, `bison`.
 
-The parser sources are bundled as a git submodule (`glsl-parser/`).  Override
-with `GLSL_SRC=../glsl-parser make` to use a sibling working copy instead.
+The parser sources are bundled as a git submodule (`glsl-parser/`), pinned to
+[donniet/glsl-parser-flex](https://github.com/donniet/glsl-parser-flex), a fork of
+[nnesse/glsl-parser](https://github.com/nnesse/glsl-parser) that fixes numeric-literal
+lexing (see below).  Override with `GLSL_SRC=../glsl-parser make` to use a sibling
+working copy instead.
+
+### Numeric-literal fix in the bundled fork
+
+The upstream lexer rejected valid GLSL exponent literals. The forked `glsl.lex`
+accepts the full GLSL 4.1.4 / ESSL 3.00 Appendix A literal forms:
+
+- exponents: `1e5`, `1e-5`, `1E+5`, `1.0e5` (previously hard parse errors)
+- trailing dot: `1.`
+- spec-optional suffixes: `1.5f`, `123u`, `123ul`, `0xFFu`
+- hex: `0x1F` (INTCONSTANT), `0xFFu` (UINTCONSTANT), `0x1p2` (FLOATCONSTANT)
+
+Hex values are computed by small self-contained helpers in the lexer
+(no `strtol`/`ldexp`), so the change stays portable to the upstream gcc build.
+The same change is proposed upstream to nnesse/glsl-parser as a PR.
 
 Produces: `glsl-parser.wasm` (~85 KB)
 
@@ -77,7 +94,7 @@ See `test/index.html` for a working demo.
 
 ```
 glsl-parser-wasm/
-├── glsl-parser/              # git submodule (nnesse/glsl-parser)
+├── glsl-parser/              # git submodule (donniet/glsl-parser-flex, fork of nnesse/glsl-parser)
 ├── Makefile                  # Build system (GLSL_SRC ?= glsl-parser)
 ├── libmin/
 │   ├── minlib.h              # Minimal libc declarations
